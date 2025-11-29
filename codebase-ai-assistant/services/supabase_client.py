@@ -123,4 +123,69 @@ class SupabaseClient:
         
         result = self.client.table('code_changes').update(data).eq('id', change_id).execute()
         return result.data[0] if result.data else {}
+    
+    # Document operations
+    def create_document(self, repo_id: int, file_name: str, file_path: Optional[str] = None,
+                       file_url: Optional[str] = None, file_size: Optional[int] = None,
+                       pages: Optional[int] = None, extracted_text: Optional[str] = None,
+                       text_summary: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None,
+                       document_type: str = 'pdf') -> Dict[str, Any]:
+        """Create a new document record."""
+        data = {
+            'repo_id': repo_id,
+            'document_type': document_type,
+            'file_name': file_name,
+            'processing_status': 'pending'
+        }
+        
+        if file_path:
+            data['file_path'] = file_path
+        if file_url:
+            data['file_url'] = file_url
+        if file_size:
+            data['file_size'] = file_size
+        if pages:
+            data['pages'] = pages
+        if extracted_text:
+            data['extracted_text'] = extracted_text
+        if text_summary:
+            data['text_summary'] = text_summary
+        if metadata:
+            data['metadata'] = metadata
+        
+        result = self.client.table('repository_documents').insert(data).execute()
+        return result.data[0] if result.data else {}
+    
+    def get_document(self, doc_id: int) -> Optional[Dict[str, Any]]:
+        """Get document by ID."""
+        result = self.client.table('repository_documents').select('*').eq('id', doc_id).execute()
+        return result.data[0] if result.data else None
+    
+    def get_repository_documents(self, repo_id: int) -> List[Dict[str, Any]]:
+        """Get all documents for a repository."""
+        result = self.client.table('repository_documents').select('*').eq('repo_id', repo_id).order('created_at', desc=True).execute()
+        return result.data if result.data else []
+    
+    def update_document(self, doc_id: int, updates: Dict[str, Any]) -> Dict[str, Any]:
+        """Update document record."""
+        from datetime import datetime
+        updates['updated_at'] = datetime.utcnow().isoformat()
+        result = self.client.table('repository_documents').update(updates).eq('id', doc_id).execute()
+        return result.data[0] if result.data else {}
+    
+    def delete_document(self, doc_id: int) -> bool:
+        """Delete document record."""
+        result = self.client.table('repository_documents').delete().eq('id', doc_id).execute()
+        return True
+    
+    def update_repository_document_count(self, repo_id: int):
+        """Update repository document count."""
+        documents = self.get_repository_documents(repo_id)
+        count = len([d for d in documents if d.get('processing_status') == 'completed'])
+        has_docs = count > 0
+        
+        self.update_repository(repo_id, {
+            'documents_count': count,
+            'has_documents': has_docs
+        })
 

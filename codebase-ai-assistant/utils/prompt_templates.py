@@ -26,14 +26,18 @@ Current Codebase Structure:
 Dependency Graph:
 {dependency_graph}
 
+Additional Documentation (PDFs):
+{pdf_documents}
+
 Proposed Change:
 {change_description}
 
 Please analyze:
 1. Which files and modules will be affected?
 2. Are there any existing features that overlap with this change?
-3. What are the potential risks or conflicts?
-4. What is your recommendation?
+3. Does this change conflict with any documented requirements or specifications?
+4. What are the potential risks or conflicts?
+5. What is your recommendation?
 
 Respond in JSON format:
 {{

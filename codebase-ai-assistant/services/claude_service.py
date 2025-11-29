@@ -40,12 +40,16 @@ class ClaudeService:
             repo_context: {
                 'structure': dict,
                 'relevant_files': list,
-                'documentation': str
+                'documentation': str,
+                'pdf_summaries': list
             }
             
         Returns:
             Dictionary with answer, relevant_files, tokens_used
         """
+        # Store context for PDF access in cached context builder
+        self._last_repo_context = repo_context
+        
         # Build cached system context
         repo_structure = repo_context.get('structure', {})
         relevant_files = repo_context.get('relevant_files', [])
@@ -55,7 +59,7 @@ class ClaudeService:
         
         # Build or retrieve cached context
         if cache_key not in self._cached_contexts:
-            system_context = self._build_cached_context(repo_structure, relevant_files)
+            system_context = self._build_cached_context(repo_structure, relevant_files, repo_context)
             self._cached_contexts[cache_key] = system_context
         else:
             system_context = self._cached_contexts[cache_key]
@@ -106,11 +110,13 @@ class ClaudeService:
         """
         repo_structure = repo_context.get('structure', {})
         dependency_graph = repo_context.get('dependency_graph', {})
+        pdf_documents = repo_context.get('pdf_documents', 'No additional documentation available.')
         
         # Build prompt
         prompt = IMPACT_ANALYSIS_PROMPT.format(
             repo_structure=json.dumps(repo_structure, indent=2),
             dependency_graph=json.dumps(dependency_graph, indent=2),
+            pdf_documents=pdf_documents[:3000] if pdf_documents else 'No additional documentation available.',
             change_description=change_request
         )
         
@@ -254,7 +260,8 @@ class ClaudeService:
         }
     
     def _build_cached_context(self, repo_structure: Dict[str, Any], 
-                             relevant_files: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                             relevant_files: List[Dict[str, Any]],
+                             repo_context: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """
         Build cached system context for prompt caching.
         
@@ -268,6 +275,11 @@ class ClaudeService:
             f"File: {f['file_path']}\n{f.get('content', '')[:2000]}"  # Limit content size
             for f in relevant_files[:10]  # Limit number of files
         ])
+        
+        # Get PDF documentation from context if available
+        pdf_docs = ""
+        if repo_context:
+            pdf_docs = repo_context.get('documentation', '')
         
         context_text = f"""You are analyzing a Flask-based Healthcare Insurance API codebase.
 
@@ -283,6 +295,9 @@ Project Documentation:
 - Use type hints
 - Include docstrings
 - Handle errors gracefully
+
+Additional Documentation (PDFs):
+{pdf_docs[:3000] if pdf_docs else 'No additional documentation available.'}
 """
         
         return [{

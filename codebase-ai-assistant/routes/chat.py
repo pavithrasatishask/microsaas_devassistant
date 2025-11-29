@@ -68,12 +68,17 @@ def ask_question():
         # Get relevant files
         relevant_files = analyzer.get_relevant_files(question, repo_id, top_k=5)
         
+        # Get PDF documents for repository
+        pdf_documents = supabase.get_repository_documents(repo_id)
+        pdf_context = _build_pdf_context(pdf_documents, question)
+        
         # Build repo context
         structure = repo.get('structure_json', {}).get('structure', {})
         repo_context = {
             'structure': structure,
             'relevant_files': relevant_files,
-            'documentation': ''  # Could be enhanced
+            'documentation': pdf_context.get('text', ''),
+            'pdf_summaries': pdf_context.get('summaries', [])
         }
         
         # Get answer from Claude

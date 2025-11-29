@@ -32,4 +32,13 @@ class Config:
     # API Limits
     MAX_TOKENS_PER_REQUEST = 4096
     MAX_REPO_SIZE_MB = 100
+    
+    # PDF Processing Configuration
+    PDF_STORAGE_PATH = os.getenv("PDF_STORAGE_PATH", "/tmp/documents")
+    MAX_PDF_SIZE_MB = 50  # Max PDF file size in MB
+    MAX_PDF_PAGES = 500   # Max pages per PDF
+    PDF_TEXT_CHUNK_SIZE = 2000  # Tokens per chunk for large PDFs
+    
+    # Supabase Storage (optional, for future use)
+    SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "repository-documents")
 

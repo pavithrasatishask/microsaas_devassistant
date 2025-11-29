@@ -69,10 +69,15 @@ def analyze_change_request():
             conv = supabase.create_conversation(repo_id, title=change_description[:50])
             conversation_id = conv['id']
         
+        # Get PDF documents for repository
+        pdf_documents = supabase.get_repository_documents(repo_id)
+        pdf_context = _build_pdf_context(pdf_documents, change_description)
+        
         # Analyze impact
         repo_data = {
             'structure_json': repo.get('structure_json', {}),
-            'local_path': repo.get('local_path')
+            'local_path': repo.get('local_path'),
+            'pdf_documents': pdf_context  # Add PDF context
         }
         
         impact_result = impact_detector.analyze_change_impact(
@@ -135,4 +140,49 @@ def get_analysis(analysis_id):
     
     except Exception as e:
         return format_error_response(f"Internal error: {str(e)}", 500)
+
+
+def _build_pdf_context(documents: list, query: str = None) -> dict:
+    """Build PDF context from repository documents."""
+    if not documents:
+        return {'text': '', 'summaries': []}
+    
+    # Filter to completed documents
+    completed_docs = [d for d in documents if d.get('processing_status') == 'completed']
+    
+    if not completed_docs:
+        return {'text': '', 'summaries': []}
+    
+    # Build text from summaries (to avoid token limits)
+    pdf_texts = []
+    summaries = []
+    
+    for doc in completed_docs:
+        summary = doc.get('text_summary', '')
+        extracted_text = doc.get('extracted_text', '')
+        file_name = doc.get('file_name', 'unknown.pdf')
+        
+        if summary:
+            pdf_texts.append(f"Document: {file_name}\n{summary}")
+            summaries.append({
+                'file_name': file_name,
+                'summary': summary,
+                'pages': doc.get('pages', 0)
+            })
+        elif extracted_text:
+            # Use first 1000 chars if no summary
+            truncated = extracted_text[:1000] + "..." if len(extracted_text) > 1000 else extracted_text
+            pdf_texts.append(f"Document: {file_name}\n{truncated}")
+            summaries.append({
+                'file_name': file_name,
+                'summary': truncated,
+                'pages': doc.get('pages', 0)
+            })
+    
+    combined_text = "\n\n---\n\n".join(pdf_texts)
+    
+    return {
+        'text': combined_text,
+        'summaries': summaries
+    }
 

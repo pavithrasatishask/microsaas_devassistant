@@ -63,11 +63,13 @@ class ImpactDetector:
         # Get repository structure
         structure = repo_data.get('structure_json', {}).get('structure', {})
         dependency_graph = repo_data.get('structure_json', {}).get('dependency_graph', {})
+        pdf_documents = repo_data.get('pdf_documents', {})
         
         # Use Claude to analyze impact
         repo_context = {
             'structure': structure,
-            'dependency_graph': dependency_graph
+            'dependency_graph': dependency_graph,
+            'pdf_documents': pdf_documents.get('text', '')  # Include PDF context
         }
         
         claude_analysis = self.claude.analyze_impact(change_request, repo_context)
