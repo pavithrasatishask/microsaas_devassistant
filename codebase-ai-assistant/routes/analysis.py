@@ -1,5 +1,5 @@
 """Impact analysis endpoints."""
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request
 from services.supabase_client import SupabaseClient
 from services.repository_analyzer import RepositoryAnalyzer
 from services.claude_service import ClaudeService
@@ -9,12 +9,23 @@ from utils.helpers import format_error_response, format_success_response
 
 analysis_bp = Blueprint('analysis', __name__)
 
-# Initialize services
-supabase = SupabaseClient()
-analyzer = RepositoryAnalyzer(supabase)
-cost_tracker = CostTracker()
-claude = ClaudeService(cost_tracker)
-impact_detector = ImpactDetector(claude, analyzer)
+# Lazy initialization - services created on first use
+_supabase = None
+_analyzer = None
+_cost_tracker = None
+_claude = None
+_impact_detector = None
+
+def get_services():
+    """Get or create service instances (lazy initialization)."""
+    global _supabase, _analyzer, _cost_tracker, _claude, _impact_detector
+    if _supabase is None:
+        _supabase = SupabaseClient()
+        _analyzer = RepositoryAnalyzer(_supabase)
+        _cost_tracker = CostTracker()
+        _claude = ClaudeService(_cost_tracker)
+        _impact_detector = ImpactDetector(_claude, _analyzer)
+    return _supabase, _analyzer, _cost_tracker, _claude, _impact_detector
 
 
 @analysis_bp.route('/analyze', methods=['POST'])
@@ -58,6 +69,9 @@ def analyze_change_request():
         
         if not repo_id or not change_description:
             return format_error_response("repo_id and change_description are required", 400)
+        
+        # Get services
+        supabase, analyzer, cost_tracker, claude, impact_detector = get_services()
         
         # Get repository
         repo = supabase.get_repository(repo_id)
@@ -131,6 +145,7 @@ def get_analysis(analysis_id):
         }
     """
     try:
+        supabase, _, _, _, _ = get_services()
         analysis = supabase.get_impact_analysis(analysis_id)
         
         if not analysis:

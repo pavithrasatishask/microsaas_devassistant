@@ -31,3 +31,4 @@ CREATE INDEX IF NOT EXISTS idx_repository_documents_repo_id ON repository_docume
 CREATE INDEX IF NOT EXISTS idx_repository_documents_status ON repository_documents(processing_status);
 CREATE INDEX IF NOT EXISTS idx_repository_documents_type ON repository_documents(document_type);
 
+

@@ -1,5 +1,5 @@
 """Repository management endpoints."""
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request
 from services.supabase_client import SupabaseClient
 from services.repository_analyzer import RepositoryAnalyzer
 from services.pdf_processor import PDFProcessor
@@ -8,11 +8,21 @@ from utils.helpers import format_error_response, format_success_response
 
 repository_bp = Blueprint('repository', __name__)
 
-# Initialize services
-supabase = SupabaseClient()
-analyzer = RepositoryAnalyzer(supabase)
-pdf_processor = PDFProcessor()
-doc_storage = DocumentStorage()
+# Lazy initialization - services created on first use
+_supabase = None
+_analyzer = None
+_pdf_processor = None
+_doc_storage = None
+
+def get_services():
+    """Get or create service instances (lazy initialization)."""
+    global _supabase, _analyzer, _pdf_processor, _doc_storage
+    if _supabase is None:
+        _supabase = SupabaseClient()
+        _analyzer = RepositoryAnalyzer(_supabase)
+        _pdf_processor = PDFProcessor()
+        _doc_storage = DocumentStorage()
+    return _supabase, _analyzer, _pdf_processor, _doc_storage
 
 
 @repository_bp.route('/connect', methods=['POST'])
@@ -27,7 +37,7 @@ def connect_repository():
             "pdf_urls": ["https://example.com/doc.pdf"]  # optional
         }
     
-    Request (Multipart):
+    Request (Multipart) - COMMENTED OUT: Uncomment for local execution/testing with curl file uploads:
         github_url: "https://github.com/user/repo"
         branch: "main"
         pdf_files: [file1.pdf, file2.pdf]  # optional
@@ -44,31 +54,51 @@ def connect_repository():
         }
     """
     try:
-        # Handle both JSON and multipart form data
-        if request.is_json:
-            data = request.get_json()
-            github_url = data.get('github_url')
-            branch = data.get('branch', 'main')
-            pdf_urls = data.get('pdf_urls', [])
-            pdf_files = []
-        else:
-            # Multipart form data
-            github_url = request.form.get('github_url')
-            branch = request.form.get('branch', 'main')
-            pdf_urls = request.form.getlist('pdf_urls') if 'pdf_urls' in request.form else []
-            pdf_files = request.files.getlist('pdf_files') if 'pdf_files' in request.files else []
+        # Original JSON-only implementation (for production/frontend use)
+        data = request.get_json()
+        if not data:
+            return format_error_response("JSON body is required", 400)
+        
+        github_url = data.get('github_url')
+        branch = data.get('branch', 'main')
+        pdf_urls = data.get('pdf_urls', [])
+        
+        # COMMENTED OUT: Multipart form data support for local execution/testing
+        # Uncomment the block below to enable file uploads via curl (multipart/form-data)
+        # This allows testing without a frontend by using: curl -F "github_url=..." -F "pdf_files=@file.pdf"
+        # if request.is_json:
+        #     data = request.get_json()
+        #     github_url = data.get('github_url')
+        #     branch = data.get('branch', 'main')
+        #     pdf_urls = data.get('pdf_urls', [])
+        #     pdf_files = []
+        # else:
+        #     # Multipart form data
+        #     github_url = request.form.get('github_url')
+        #     branch = request.form.get('branch', 'main')
+        #     pdf_urls = request.form.getlist('pdf_urls') if 'pdf_urls' in request.form else []
+        #     pdf_files = request.files.getlist('pdf_files') if 'pdf_files' in request.files else []
         
         if not github_url:
             return format_error_response("github_url is required", 400)
+        
+        # Get services
+        supabase, analyzer, pdf_processor, doc_storage = get_services()
         
         # Connect repository (existing functionality)
         result = analyzer.connect_repository(github_url, branch)
         repo_id = result['repo_id']
         
-        # Process PDF files
+        # Process PDF files from URLs (JSON request)
         documents_processed = []
-        if pdf_files or pdf_urls:
-            documents_processed = _process_pdfs(repo_id, pdf_files, pdf_urls)
+        if pdf_urls:
+            # COMMENTED OUT: File upload processing - uncomment when multipart is enabled above
+            # pdf_files = []  # Set empty when using JSON-only
+            documents_processed = _process_pdfs(repo_id, [], pdf_urls, supabase, pdf_processor, doc_storage)
+        
+        # COMMENTED OUT: Process uploaded PDF files (multipart) - uncomment when multipart is enabled
+        # if pdf_files or pdf_urls:
+        #     documents_processed = _process_pdfs(repo_id, pdf_files, pdf_urls, supabase, pdf_processor, doc_storage)
         
         result['documents_processed'] = len(documents_processed)
         result['documents'] = documents_processed
@@ -81,7 +111,7 @@ def connect_repository():
         return format_error_response(f"Internal error: {str(e)}", 500)
 
 
-def _process_pdfs(repo_id: int, pdf_files: list, pdf_urls: list) -> list:
+def _process_pdfs(repo_id: int, pdf_files: list, pdf_urls: list, supabase, pdf_processor, doc_storage) -> list:
     """Process uploaded PDF files and URLs."""
     documents = []
     
@@ -125,7 +155,7 @@ def _process_pdfs(repo_id: int, pdf_files: list, pdf_urls: list) -> list:
                     repo_id=repo_id,
                     file_name=file.filename if hasattr(file, 'filename') else 'unknown.pdf',
                     processing_status='failed',
-                    error_message=str(e)
+                    error_message=str(e)[:500]  # Limit error message length
                 )
                 documents.append({
                     'id': doc['id'],
@@ -175,10 +205,10 @@ def _process_pdfs(repo_id: int, pdf_files: list, pdf_urls: list) -> list:
             try:
                 doc = supabase.create_document(
                     repo_id=repo_id,
-                    file_name=url.split('/')[-1],
+                    file_name=url.split('/')[-1] if '/' in url else 'document.pdf',
                     file_url=url,
                     processing_status='failed',
-                    error_message=str(e)
+                    error_message=str(e)[:500]  # Limit error message length
                 )
                 documents.append({
                     'id': doc['id'],
@@ -211,6 +241,7 @@ def get_repository(repo_id):
         }
     """
     try:
+        supabase, _, _, _ = get_services()
         repo = supabase.get_repository(repo_id)
         
         if not repo:
@@ -249,6 +280,7 @@ def refresh_repository(repo_id):
         }
     """
     try:
+        _, analyzer, _, _ = get_services()
         result = analyzer.refresh_repository(repo_id)
         return format_success_response(result)
     
@@ -263,7 +295,12 @@ def add_document(repo_id):
     """
     Add a PDF document to a repository.
     
-    Request (Multipart):
+    Request (JSON):
+        {
+            "pdf_url": "https://..."  # required
+        }
+    
+    Request (Multipart) - COMMENTED OUT: Uncomment for local execution/testing with curl file uploads:
         pdf_file: <file>  # or
         pdf_url: "https://..."  # optional
     
@@ -276,20 +313,41 @@ def add_document(repo_id):
         }
     """
     try:
+        supabase, _, pdf_processor, doc_storage = get_services()
         # Check repository exists
         repo = supabase.get_repository(repo_id)
         if not repo:
             return format_error_response(f"Repository {repo_id} not found", 404)
         
-        pdf_file = request.files.get('pdf_file')
-        pdf_url = request.form.get('pdf_url')
+        # Original JSON-only implementation (for production/frontend use)
+        data = request.get_json()
+        if not data:
+            return format_error_response("JSON body is required", 400)
         
-        if not pdf_file and not pdf_url:
-            return format_error_response("Either pdf_file or pdf_url is required", 400)
+        pdf_url = data.get('pdf_url')
         
+        # COMMENTED OUT: Multipart form data support for local execution/testing
+        # Uncomment the block below to enable file uploads via curl (multipart/form-data)
+        # This allows testing without a frontend by using: curl -F "pdf_file=@file.pdf"
+        # pdf_file = request.files.get('pdf_file')
+        # pdf_url = request.form.get('pdf_url')
+        
+        if not pdf_url:
+            return format_error_response("pdf_url is required", 400)
+        
+        # Process PDF from URL (JSON request)
         documents = _process_pdfs(repo_id, 
-                                  [pdf_file] if pdf_file else [], 
-                                  [pdf_url] if pdf_url else [])
+                                  [],  # Empty file list for JSON-only
+                                  [pdf_url],
+                                  supabase, pdf_processor, doc_storage)
+        
+        # COMMENTED OUT: Process uploaded file (multipart) - uncomment when multipart is enabled
+        # if not pdf_file and not pdf_url:
+        #     return format_error_response("Either pdf_file or pdf_url is required", 400)
+        # documents = _process_pdfs(repo_id, 
+        #                           [pdf_file] if pdf_file else [], 
+        #                           [pdf_url] if pdf_url else [],
+        #                           supabase, pdf_processor, doc_storage)
         
         if documents:
             return format_success_response(documents[0], 201)
@@ -321,6 +379,7 @@ def get_repository_documents(repo_id):
         }
     """
     try:
+        supabase, _, _, _ = get_services()
         repo = supabase.get_repository(repo_id)
         if not repo:
             return format_error_response(f"Repository {repo_id} not found", 404)
@@ -347,6 +406,7 @@ def get_document(doc_id):
         }
     """
     try:
+        supabase, _, _, _ = get_services()
         doc = supabase.get_document(doc_id)
         if not doc:
             return format_error_response(f"Document {doc_id} not found", 404)
@@ -369,6 +429,7 @@ def delete_document(doc_id):
         }
     """
     try:
+        supabase, _, _, doc_storage = get_services()
         doc = supabase.get_document(doc_id)
         if not doc:
             return format_error_response(f"Document {doc_id} not found", 404)

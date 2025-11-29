@@ -1,5 +1,5 @@
 """Code implementation endpoints."""
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request
 from services.supabase_client import SupabaseClient
 from services.claude_service import ClaudeService
 from services.code_generator import CodeGenerator
@@ -8,11 +8,21 @@ from utils.helpers import format_error_response, format_success_response
 
 implementation_bp = Blueprint('implementation', __name__)
 
-# Initialize services
-supabase = SupabaseClient()
-cost_tracker = CostTracker()
-claude = ClaudeService(cost_tracker)
-code_generator = CodeGenerator(claude, supabase)
+# Lazy initialization - services created on first use
+_supabase = None
+_cost_tracker = None
+_claude = None
+_code_generator = None
+
+def get_services():
+    """Get or create service instances (lazy initialization)."""
+    global _supabase, _cost_tracker, _claude, _code_generator
+    if _supabase is None:
+        _supabase = SupabaseClient()
+        _cost_tracker = CostTracker()
+        _claude = ClaudeService(_cost_tracker)
+        _code_generator = CodeGenerator(_claude, _supabase)
+    return _supabase, _cost_tracker, _claude, _code_generator
 
 
 @implementation_bp.route('/generate', methods=['POST'])
@@ -50,6 +60,9 @@ def generate_code():
         
         if not approved:
             return format_error_response("Change must be approved before generating code", 400)
+        
+        # Get services
+        supabase, _, _, code_generator = get_services()
         
         # Get impact analysis
         analysis = supabase.get_impact_analysis(analysis_id)
@@ -122,6 +135,9 @@ def get_code_changes(change_id):
         }
     """
     try:
+        # Get services
+        supabase, _, _, _ = get_services()
+        
         # Get the change record
         result = supabase.client.table('code_changes').select('*').eq('id', change_id).execute()
         
@@ -154,6 +170,9 @@ def approve_code_changes(change_id):
         }
     """
     try:
+        # Get services
+        supabase, _, _, _ = get_services()
+        
         data = request.get_json()
         approved = data.get('approved', False)
         
@@ -191,6 +210,9 @@ def apply_code_changes(change_id):
         }
     """
     try:
+        # Get services
+        supabase, _, _, code_generator = get_services()
+        
         # Get change record to find repository
         change_record = supabase.client.table('code_changes').select('*').eq('id', change_id).execute()
         if not change_record.data:

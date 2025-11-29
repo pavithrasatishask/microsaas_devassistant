@@ -2,6 +2,7 @@
 from supabase import create_client, Client
 from config import Config
 from typing import Optional, Dict, Any, List
+import os
 
 
 class SupabaseClient:
@@ -12,7 +13,44 @@ class SupabaseClient:
         if not Config.SUPABASE_URL or not Config.SUPABASE_KEY:
             raise ValueError("Supabase URL and KEY must be set in environment variables")
         
-        self.client: Client = create_client(Config.SUPABASE_URL, Config.SUPABASE_KEY)
+        # Initialize Supabase client
+        # Remove proxy env vars temporarily to avoid compatibility issues
+        proxy_vars = {}
+        for key in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy']:
+            if key in os.environ:
+                proxy_vars[key] = os.environ.pop(key)
+        
+        try:
+            self.client: Client = create_client(Config.SUPABASE_URL, Config.SUPABASE_KEY)
+        except TypeError as e:
+            # Handle proxy-related TypeError
+            if 'proxy' in str(e).lower():
+                # The supabase client is trying to pass proxy to httpx, but httpx doesn't accept it
+                # Try to work around this by monkey-patching httpx.Client
+                import httpx
+                
+                # Store original __init__
+                _original_httpx_init = httpx.Client.__init__
+                
+                def _patched_httpx_init(self, *args, **kwargs):
+                    # Remove proxy from kwargs before calling original init
+                    kwargs.pop('proxy', None)
+                    return _original_httpx_init(self, *args, **kwargs)
+                
+                # Apply patch
+                httpx.Client.__init__ = _patched_httpx_init
+                
+                try:
+                    # Retry creating the client
+                    self.client: Client = create_client(Config.SUPABASE_URL, Config.SUPABASE_KEY)
+                finally:
+                    # Restore original
+                    httpx.Client.__init__ = _original_httpx_init
+            else:
+                raise
+        finally:
+            # Restore proxy vars if they existed
+            os.environ.update(proxy_vars)
     
     # Repository operations
     def create_repository(self, name: str, github_url: str, branch: str = 'main', 
@@ -129,13 +167,14 @@ class SupabaseClient:
                        file_url: Optional[str] = None, file_size: Optional[int] = None,
                        pages: Optional[int] = None, extracted_text: Optional[str] = None,
                        text_summary: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None,
-                       document_type: str = 'pdf') -> Dict[str, Any]:
+                       document_type: str = 'pdf', processing_status: str = 'pending',
+                       error_message: Optional[str] = None) -> Dict[str, Any]:
         """Create a new document record."""
         data = {
             'repo_id': repo_id,
             'document_type': document_type,
             'file_name': file_name,
-            'processing_status': 'pending'
+            'processing_status': processing_status
         }
         
         if file_path:
@@ -152,6 +191,8 @@ class SupabaseClient:
             data['text_summary'] = text_summary
         if metadata:
             data['metadata'] = metadata
+        if error_message:
+            data['error_message'] = error_message
         
         result = self.client.table('repository_documents').insert(data).execute()
         return result.data[0] if result.data else {}
@@ -163,8 +204,9 @@ class SupabaseClient:
     
     def get_repository_documents(self, repo_id: int) -> List[Dict[str, Any]]:
         """Get all documents for a repository."""
-        result = self.client.table('repository_documents').select('*').eq('repo_id', repo_id).order('created_at', desc=True).execute()
-        return result.data if result.data else []
+        result = self.client.table('repository_documents').select('*').eq('repo_id', repo_id).order('created_at', desc=False).execute()
+        # Reverse to get newest first
+        return list(reversed(result.data)) if result.data else []
     
     def update_document(self, doc_id: int, updates: Dict[str, Any]) -> Dict[str, Any]:
         """Update document record."""

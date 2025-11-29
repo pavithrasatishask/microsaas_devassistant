@@ -1,5 +1,5 @@
 """Chat/question endpoints."""
-from flask import Blueprint, request, jsonify, Response
+from flask import Blueprint, request
 from services.supabase_client import SupabaseClient
 from services.repository_analyzer import RepositoryAnalyzer
 from services.claude_service import ClaudeService
@@ -8,11 +8,21 @@ from utils.helpers import format_error_response, format_success_response
 
 chat_bp = Blueprint('chat', __name__)
 
-# Initialize services
-supabase = SupabaseClient()
-analyzer = RepositoryAnalyzer(supabase)
-cost_tracker = CostTracker()
-claude = ClaudeService(cost_tracker)
+# Lazy initialization - services created on first use
+_supabase = None
+_analyzer = None
+_cost_tracker = None
+_claude = None
+
+def get_services():
+    """Get or create service instances (lazy initialization)."""
+    global _supabase, _analyzer, _cost_tracker, _claude
+    if _supabase is None:
+        _supabase = SupabaseClient()
+        _analyzer = RepositoryAnalyzer(_supabase)
+        _cost_tracker = CostTracker()
+        _claude = ClaudeService(_cost_tracker)
+    return _supabase, _analyzer, _cost_tracker, _claude
 
 
 @chat_bp.route('/ask', methods=['POST'])
@@ -47,6 +57,9 @@ def ask_question():
         
         if not repo_id or not question:
             return format_error_response("repo_id and question are required", 400)
+        
+        # Get services
+        supabase, analyzer, cost_tracker, claude = get_services()
         
         # Get repository
         repo = supabase.get_repository(repo_id)
@@ -121,6 +134,7 @@ def get_conversation(conv_id):
         }
     """
     try:
+        supabase, _, _, _ = get_services()
         conv = supabase.get_conversation(conv_id)
         if not conv:
             return format_error_response(f"Conversation {conv_id} not found", 404)
